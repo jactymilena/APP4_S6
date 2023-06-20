@@ -1,6 +1,5 @@
 #include <vector>
 
-
 const int MAX_SIZE = 80;
 const int BASE_TRAME_SIZE = 7;
 const int PIN_OUT = 32; 
@@ -12,6 +11,9 @@ const int ONE_MODE = 1;
 
 std::vector<uint8_t> buffer;
 
+int valIn;
+int valOut;
+
 
 // Define functions
 void receiveRising();
@@ -21,14 +23,14 @@ void TaskSend(void *pvParameters);
 
 void setup() {
   // put your setup code here, to run once:
-  // pinMode(PIN_OUT, OUTPUT);
-  // pinMode(PIN_IN, INPUT);
+  pinMode(PIN_OUT, OUTPUT);
+  pinMode(PIN_IN, INPUT);
 
   Serial.begin(115200);
 
   // Receive interrupts
   // attachInterrupt(digitalPinToInterrupt(PIN_IN), receiveRising, CHANGE);
-  // attachInterrupt(digitalPinToInterrupt(PIN_IN), receiveFalling, FALLING);
+  attachInterrupt(digitalPinToInterrupt(PIN_IN), receiveFalling, FALLING);
 
   // Receive Task
   xTaskCreate(TaskReceive, "Receive Trame", 2048, NULL, 2,  NULL);
@@ -40,6 +42,14 @@ void setup() {
 
 void loop() {
   // put your main code here, to run repeatedly:
+  unsigned long duration = pulseIn(PIN_IN, HIGH);
+  Serial.printf("pulse duration %d ", duration);
+
+  valIn = digitalRead(PIN_IN); 
+  valOut = digitalRead(PIN_OUT); 
+
+  Serial.printf("in %d ", valIn);
+  Serial.printf("ou %d\n", valOut);
 
 }
 
@@ -67,6 +77,22 @@ void sendPulse(int mode) { // falling (1), rising (0)
   delayMicroseconds(100);
 }
 
+void sendZero() {
+  digitalWrite(PIN_OUT, LOW);
+  delayMicroseconds(500);
+
+  digitalWrite(PIN_OUT, HIGH);
+  delayMicroseconds(500);
+}
+
+void sendOne() {
+  digitalWrite(PIN_OUT, HIGH);
+  delayMicroseconds(500);
+
+  digitalWrite(PIN_OUT, LOW);
+  delayMicroseconds(500);
+}
+
 // void sendTrame(uint8_t *trame, int trame_size) {
 //   for(int i = 0; i < trame_size; i++) {
 
@@ -82,7 +108,7 @@ void receiveRising() {
   Serial.println("Rising : 0");
 }
 
-void receiveFalling() {
+void IRAM_ATTR receiveFalling() {
   buffer.push_back(1);
   Serial.println("Falling : 1");
 }
@@ -101,12 +127,14 @@ void TaskReceive(void *pvParameters) {
 }
 
 void TaskSend(void *pvParameters) {  
+  const TickType_t xDelay = 500;
   while(true) {
-    Serial.println("TaskSend");
-    sendPulse(ONE_MODE);
-    delay(1000);
-    sendPulse(ZERO_MODE);
-    delay(1000);
+    // Serial.println("TaskSend");
+    // sendZero();
+    // delay(1000);
+    sendOne();
+    vTaskDelay(xDelay);
+    // delay(1000);
   }
 }
 

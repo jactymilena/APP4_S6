@@ -1,4 +1,5 @@
 #include <vector>
+#include <mutex>
 
 const int MAX_SIZE = 80;
 const int BASE_TRAME_SIZE = 7;
@@ -9,8 +10,7 @@ const int SEND_CORE = 1;
 const int ZERO_MODE = 0;
 const int ONE_MODE = 1;
 const int HALF_PERIOD = 500;
-const int THRESHOLD_PERIOD = 5;
-
+const int THRESHOLD_PERIOD = 40;
 
 std::vector<uint8_t> buffer;
 
@@ -21,11 +21,15 @@ unsigned long duration;
 unsigned long timer;
 unsigned long lastChangeTime;
 bool checkPeriod;
+bool receivedBit;
+
+std::mutex receivedBitMutex;
+
 
 // Define functions
-void receiveRising();
+// void receiveRising();
 // void receiveFalling();  
-void receivePulse(); 
+void receivePulse();
 void TaskReceive(void *pvParameters);
 void TaskSend(void *pvParameters);
 
@@ -35,10 +39,12 @@ void setup() {
   pinMode(PIN_IN, INPUT);
 
   Serial.begin(115200);
+  Serial.println("START ------------------------");
 
   // Receive interrupts
-  attachInterrupt(digitalPinToInterrupt(PIN_IN), receiveRising, RISING);
-  // attachInterrupt(digitalPinToInterrupt(PIN_IN), receivePulse, CHANGE);
+  // attachInterrupt(digitalPinToInterrupt(PIN_IN), receiveRising, CHANGE);
+  // attachInterrupt(digitalPinToInterrupt(PIN_IN), receiveFalling, FALLING);
+  attachInterrupt(digitalPinToInterrupt(PIN_IN), receivePulse, CHANGE);
 
   // Receive Task
   xTaskCreate(TaskReceive, "Receive Trame", 2048, NULL, 2,  NULL);
@@ -47,20 +53,29 @@ void setup() {
 
   lastChangeTime = 0;
   checkPeriod = true;
+  receivedBit = false;
 }
 
 void loop() {
+  // Serial.println("alllooooo");
   // put your main code here, to run repeatedly:
-  // duration = pulseIn(PIN_IN);
+  // unsigned long duration = pulseIn(PIN_IN, HIGH);
   // Serial.printf("pulse duration %d ", duration);
-  timer = micros();
 
-  valIn = digitalRead(PIN_IN); 
-  valOut = digitalRead(PIN_OUT); 
+  // timer = micros();
+  // valIn = digitalRead(PIN_IN); 
+  // valOut = digitalRead(PIN_OUT); 
 
   // Serial.printf("in %d ", valIn);
-  // Serial.printf("ou %d\n", valOut);
+  // Serial.printf("buffer size %d\n", buffer.size());
 
+  // if(buffer.size() > 10) {
+  //   Serial.println(" START buffer print");
+  //   for(int i = 0; i < buffer.size(); i++) {
+  //     Serial.printf(" %d", buffer[i]);
+  //   }
+  //   Serial.println(" END buffer print");
+  // }
 }
 
 uint8_t* createTrame(uint8_t* data, uint8_t size) {
@@ -74,18 +89,10 @@ uint8_t* createTrame(uint8_t* data, uint8_t size) {
     0x00, // header - Type + Flags
     size, // header - payload size
     0x7E // end
-  };
+  };// 
 
   return trame;
-}
-
-// void sendPulse(int mode) { // falling (1), rising (0)
-//   digitalWrite(PIN_OUT, mode);
-//   delayMicroseconds(100);
-
-//   digitalWrite(PIN_OUT, !mode);
-//   delayMicroseconds(100);
-// }
+} 
 
 void sendZero() {
   digitalWrite(PIN_OUT, LOW);
@@ -113,42 +120,35 @@ void sendOne() {
 /*-------------------- Interrups -------------------*/
 /*--------------------------------------------------*/
 
-void IRAM_ATTR receiveRising() {
-  buffer.push_back(0);
-  Serial.println("Rising : 0");
-}
+void IRAM_ATTR receivePulse() { 
+  // Check if rising or falling
+  int rxVal = digitalRead(PIN_IN);
+  // Serial.printf("\nChange in %d ", rxVal);
+  if(checkPeriod) {
+    int diff = micros() - lastChangeTime;
+    // int period = HALF_PERIOD * 2;
 
-// void IRAM_ATTR receiveFalling() {
-//   buffer.push_back(1);
-//   Serial.println("Falling : 1");
-// }
+    // Serial.printf("diff %d \n", diff);
+    if((diff >= HALF_PERIOD - THRESHOLD_PERIOD) && (diff <= HALF_PERIOD + THRESHOLD_PERIOD)) { // one period has pass
+      // Serial.println("one period ");
+      checkPeriod = false;
+      // read pin et mettre dans buffer selon rising ou falling sachant que on est au 2eme change
+      buffer.push_back(!rxVal); 
+      // std::unique_lock<std::mutex> mu(receivedBitMutex);
+      // receivedBit = true;
+      // mu.unlock();
+    }
+    // si plus qu'une periode
+    //    push selon rising et falling
+    //    checkPeriod = true
+  } else {
+    checkPeriod = true;
+  }
 
-// void IRAM_ATTR receivePulse() { 
-//   // Check if rising or falling
-//   int rxVal = digitalRead(PIN_IN);
-//   Serial.printf("\nChange in %d ", rxVal);
-//   // if(checkPeriod) {
-//   //   int diff = timer - lastChangeTime;
-//   //   if((diff >= diff - THRESHOLD_PERIOD) && (diff <= diff + THRESHOLD_PERIOD)) { // one period has pass
-//   //     checkPeriod = false;
-//   //     // read pin et mettre dans buffer selon rising ou falling sachant que on est au 2eme change
-//   //     // buffer.push_back(!rxVal); 
-//   //   }
-//   //   // si plus qu'une periode
-//   //   //    push selon rising et falling
-//   //   //    checkPeriod = true
-//   // }
-
-
-
-  
-
-//   lastChangeTime = timer;
+    lastChangeTime = micros();
 //   // Add bit to vector
 //   // Notify task
-
-
-// }
+}
 
 /*--------------------------------------------------*/
 /*---------------------- Tasks ---------------------*/
@@ -157,19 +157,34 @@ void IRAM_ATTR receiveRising() {
 void TaskReceive(void *pvParameters) { 
   // (void) pvParameters;
   while(true) {
-    // Serial.println("TaskReceive");
-    delay(1000);
+    Serial.printf("buffer size %d\n", buffer.size());
+
+  //   // Serial.println("TaskReceive");
+    // delay(1000);
+    // if(receivedBit) {
+    //   std::unique_lock<std::mutex> mu(receivedBitMutex);
+    //   receivedBit = false;
+    //   mu.unlock();
+    //   Serial.println(" START buffer print");
+    //   for(int i = 0; i < buffer.size(); i++) {
+    //     Serial.printf(" %d", buffer[i]);
+    //   }
+    //   Serial.println(" END buffer print");
+     
+    // }
   }
-  
 }
 
 void TaskSend(void *pvParameters) {  
   const TickType_t xDelay = 500;
+  // for(int i = 0; i < 5; i++) {
+  //     sendOne();
+  //     vTaskDelay(xDelay);
+  // }
+
   while(true) {
     // Serial.println("TaskSend");
     sendZero();
-    // delay(1000);
-    // sendOne();
     vTaskDelay(xDelay);
     // delay(1000);
   }

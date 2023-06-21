@@ -20,8 +20,6 @@ std::vector<uint8_t> buffer{};
 
 int valIn;
 int valOut;
-int diff;
-int rxVal;
 unsigned long duration;
 
 unsigned long timer;
@@ -54,28 +52,7 @@ void setup() {
   receivedBit = false;
 }
 
-void loop() {
-
-  // Serial.println("alllooooo");
-  // put your main code here, to run repeatedly:
-  // unsigned long duration = pulseIn(PIN_IN, HIGH);
-  
-
-  // timer = micros();
-  // valIn = digitalRead(PIN_IN); 
-  // valOut = digitalRead(PIN_OUT); 
-
-  // Serial.printf("in %d ", valIn);
-  // Serial.printf("buffer size %d\n", buffer.size());
-
-  // if(buffer.size() > 10) {
-  //   Serial.println(" START buffer print");
-  //   for(int i = 0; i < buffer.size(); i++) {
-  //     Serial.printf(" %d", buffer[i]);
-  //   }
-  //   Serial.println(" END buffer print");
-  // }
-}
+void loop() { }
 
 uint8_t* createTrame(uint8_t* data, uint8_t size) {
   // std::vector<uint8_t> trame( (BASE_TRAME_SIZE + size) % MAX_SIZE);
@@ -117,6 +94,17 @@ void sendOne() {
   delayMicroseconds(HALF_PERIOD);
 }
 
+void addBit(int bit) {
+  buffer.push_back(bit); 
+  checkPeriod = false;
+
+  Serial.printf("buffer START");
+  for(int i = 0; i < buffer.size(); i++) {
+    Serial.printf(" %d", buffer[i]);
+  }
+  Serial.println(" END");
+}
+
 // void sendTrame(uint8_t *trame, int trame_size) {
 //   for(int i = 0; i < trame_size; i++) {
 
@@ -127,47 +115,7 @@ void sendOne() {
 /*-------------------- Interrups -------------------*/
 /*--------------------------------------------------*/
 
-// void IRAM_ATTR receivePulse() { 
-//   rxVal = digitalRead(PIN_IN);
-//   // Serial.printf("CHANGE %d\n", rxVal);
-
-//   auto currentTime = micros();
-//   diff = currentTime - lastChangeTime;
-
-//   if(checkPeriod) {
-    
-//     // Serial.printf("Diff %d\n", diff);
-//     if((diff >= HALF_PERIOD - THRESHOLD_PERIOD) && (diff <= HALF_PERIOD + THRESHOLD_PERIOD)) { // one period has pass
-//     // Serial.println("half period");
-//       checkPeriod = false;
-//       // read pin et mettre dans buffer selon rising ou falling sachant que on est au 2eme change
-//       // m.lock();
-//       buffer.push_back(!rxVal); 
-//       // m.unlock();
-//       receivedBit = true;
-//     // }
-//     } else if(diff >= (HALF_PERIOD*2 - THRESHOLD_PERIOD)) { // two period has pass // 
-//       // Serial.println("one period");
-//       // si plus qu'une periode
-//       //    push selon rising et falling
-//       //    checkPeriod = true
-//       checkPeriod = false;
-//       // m.lock();
-//       buffer.push_back(!rxVal); 
-//       // m.unlock();
-//       receivedBit = true;
-//     }
-//   } else {
-//     checkPeriod = true;
-//   }
-
-//   lastChangeTime = currentTime;
-//   // Add bit to vector
-//   // Notify task
-// }
-
 void IRAM_ATTR receivePulse() {
-  // buffer.push_back(digitalRead(PIN_IN));  
   receivedBit = true;
 }
 
@@ -176,70 +124,37 @@ void IRAM_ATTR receivePulse() {
 /*--------------------------------------------------*/
 
 void TaskReceive(void *pvParameters) { 
-  const TickType_t xDelay = 20;
-
+  int periodElapse;
+  int rxVal;
+  
   for (;;) {
-    // delayMicroseconds(20);
-    // vTaskDelay(xDelay);
     auto currentTime = micros();
-    diff = currentTime - lastChangeTime;
+    periodElapse = currentTime - lastChangeTime;
 
-    if(!checkPeriod && (diff >= HALF_PERIOD*2 + TIME_BETWEEN_PERIODS - THRESHOLD_PERIOD) && (diff <= HALF_PERIOD*2 + TIME_BETWEEN_PERIODS + THRESHOLD_PERIOD)) {
+    if(!checkPeriod && (periodElapse >= HALF_PERIOD*2 + TIME_BETWEEN_PERIODS - THRESHOLD_PERIOD) && (periodElapse <= HALF_PERIOD*2 + TIME_BETWEEN_PERIODS + THRESHOLD_PERIOD)) {
         checkPeriod = true;
-        Serial.printf("if diff %d\n", diff);
+        Serial.printf("if diff %d\n", periodElapse);
     }
 
-    // TODO : ajouter les 20 ticks (convertis au if en haut pour gerer le changement de bit)
     if(receivedBit) {
       receivedBit = false;
-      
       rxVal = digitalRead(PIN_IN);
       
+      Serial.printf("diff %6d rx  %d ", periodElapse, rxVal);
 
-      Serial.printf("diff %6d rx  %d ", diff, rxVal);
-      if(checkPeriod) {
-        if(diff >= HALF_PERIOD - THRESHOLD_PERIOD) { // one period has pass
-          checkPeriod = false;
-          buffer.push_back(!rxVal); 
+      if(buffer.size() != 0) {
+        if(checkPeriod) {
+          if(periodElapse >= HALF_PERIOD - THRESHOLD_PERIOD || buffer.size() == 0) { // one period has pass
+            addBit(!rxVal);
+          }
+        } else {
+          checkPeriod = true;
+          Serial.println(" ");
         }
-        
-        Serial.printf("buffer START");
-        for(int i = 0; i < buffer.size(); i++) {
-          Serial.printf(" %d", buffer[i]);
-        }
-        Serial.println(" END");
-      } else {
-        checkPeriod = true;
-        Serial.println(" ");
+      } else  { // first bit TODO : a revoir, marche pas pour le zero et le un en meme temps
+          if(rxVal == 0)
+            addBit(!rxVal);
       }
-
-
-      // if(checkPeriod) {
-  
-      //   // if((diff >= HALF_PERIOD - THRESHOLD_PERIOD) && (diff <= HALF_PERIOD + THRESHOLD_PERIOD)) { // one period has pass
-      //   //   checkPeriod = false;
-      //   //   buffer.push_back(!rxVal); 
-      //   //   Serial.printf("if 1 ");
-      //   // } else if(diff >= (HALF_PERIOD*2 - THRESHOLD_PERIOD)) { // two period has pass // 
-      //   //   checkPeriod = false;
-      //   //   buffer.push_back(!rxVal); 
-      //   //   Serial.printf("if 2  ");
-      //   // } 
-
-      //   if(diff >= HALF_PERIOD - THRESHOLD_PERIOD) { // one period has pass
-      //     checkPeriod = false;
-      //     buffer.push_back(!rxVal); 
-      //     // Serial.printf("if ");
-      //   }
-
-      //   Serial.printf("buffer START");
-      //   for(int i = 0; i < buffer.size(); i++) {
-      //     Serial.printf(" %d", buffer[i]);
-      //   }
-      //   Serial.println(" END");
-      // } else {
-      //   checkPeriod = true;
-      // }
 
       lastChangeTime = currentTime;
     }
@@ -251,10 +166,10 @@ void TaskSend(void *pvParameters) {
   for(int i = 0; i < 5; i++) {
       sendOne();
       vTaskDelay(xDelay);
-      // delayMicroseconds(20);
       // sendZero();
       // vTaskDelay(xDelay);
-  }
+  } // 1 0 1 0 1 0 1 0 1 0 0 0 0 0 0 
+    // 1   1 0 1 0 1 0 1 0 0 0 0 0 0
 
   for(int i = 0; i < 5; i++) {
       sendZero();

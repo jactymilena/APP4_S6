@@ -12,6 +12,9 @@ const int ZERO_MODE = 0;
 const int ONE_MODE = 1;
 const int HALF_PERIOD = 500;
 const int THRESHOLD_PERIOD = 200;
+const int TIME_BETWEEN_PERIODS = 5000 ; // en micro
+
+const TickType_t xDelay = TIME_BETWEEN_PERIODS / 1000 * portTICK_PERIOD_MS; // en millis
 
 std::vector<uint8_t> buffer{};
 
@@ -178,23 +181,26 @@ void TaskReceive(void *pvParameters) {
   for (;;) {
     // delayMicroseconds(20);
     // vTaskDelay(xDelay);
-    
-    // if(lastChangeTime >= HALF_PERIOD*2 - THRESHOLD_PERIOD) {
-    //     checkPeriod = true;
-    // }
+    auto currentTime = micros();
+    diff = currentTime - lastChangeTime;
+
+    if(!checkPeriod && (diff >= HALF_PERIOD*2 + TIME_BETWEEN_PERIODS - THRESHOLD_PERIOD) && (diff <= HALF_PERIOD*2 + TIME_BETWEEN_PERIODS + THRESHOLD_PERIOD)) {
+        checkPeriod = true;
+        Serial.printf("if diff %d\n", diff);
+    }
+
     // TODO : ajouter les 20 ticks (convertis au if en haut pour gerer le changement de bit)
     if(receivedBit) {
       receivedBit = false;
-      auto currentTime = micros();
+      
       rxVal = digitalRead(PIN_IN);
-      diff = currentTime - lastChangeTime;
+      
 
-      Serial.printf("\ndiff %6d rx  %d ", diff, rxVal);
+      Serial.printf("diff %6d rx  %d ", diff, rxVal);
       if(checkPeriod) {
         if(diff >= HALF_PERIOD - THRESHOLD_PERIOD) { // one period has pass
           checkPeriod = false;
           buffer.push_back(!rxVal); 
-          // Serial.printf("if ");
         }
         
         Serial.printf("buffer START");
@@ -204,6 +210,7 @@ void TaskReceive(void *pvParameters) {
         Serial.println(" END");
       } else {
         checkPeriod = true;
+        Serial.println(" ");
       }
 
 
@@ -240,7 +247,7 @@ void TaskReceive(void *pvParameters) {
 }
 
 void TaskSend(void *pvParameters) {  
-  const TickType_t xDelay = 20;
+  // const TickType_t xDelay = 20;
   for(int i = 0; i < 5; i++) {
       sendOne();
       vTaskDelay(xDelay);

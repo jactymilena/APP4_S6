@@ -125,7 +125,6 @@ void sendByte(uint8_t bits) {
   int val;
   for(int i = 7; i >= 0; i--) {
     val = (bits >> i) & 0x01;
-    // Serial.printf("val %d ", val)
     sendPulse(val);
     vTaskDelay(xDelay);
   }
@@ -143,16 +142,18 @@ uint8_t convertBufferToByte() {
 }
 
 void trameAnalyzer() {
-  Serial.printf("buffer size %d\n", buffer.size());
-  convertBufferToByte();
-  // switch(currentState){
-  //   case State::IDLE:
+  Serial.printf("buffer size %d currState %d\n", buffer.size(), currentState);
+  uint8_t data = convertBufferToByte();
+  switch(currentState) {
+    case State::IDLE:
+      if(data == PREAMBLE) {
+        currentState = State::PREAMBLE;
+      }
+      break;
 
-
-
-  //   case PREAMBLE:
+  //   case :
   //       if(data == "01010101"){
-  //           currentState = State::START;
+  //           
   //       }
   //       break;
         
@@ -188,7 +189,7 @@ void trameAnalyzer() {
   //       payload.clear();
   //       payloadLength = 0;
   //       break;
-  // }
+  }
 }
 
 /*--------------------------------------------------*/

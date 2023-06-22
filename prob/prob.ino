@@ -23,7 +23,8 @@ const uint8_t START_END = 0b01111110;
 const TickType_t xDelay = TIME_BETWEEN_PERIODS / 1000 * portTICK_PERIOD_MS; // en millis
 
 std::vector<uint8_t> buffer{};
-std::vector<uint8_t> payload{};
+std::vector<uint8_t> payload{}; // on a deja un index, pourrait etre une array
+std::vector<uint8_t> crcArray{};
 
 unsigned long timer;
 unsigned long lastChangeTime = 0;
@@ -161,6 +162,7 @@ void initState() {
 
 void trameAnalyzer() {
   uint8_t data = convertBufferToByte();
+  CRC16 crc;
   
   // Serial.printf("currState %d data %d\n", currentState, data);
   // TODO : fonction pour reinitialiser idle (clear le buffer et tout remettre, checkPeriod, ignorer erreur)
@@ -196,8 +198,14 @@ void trameAnalyzer() {
     case State::PAYLOAD:
       if(currentPayloadSize == payloadSize) {
         currentState = State::CRC;
-        // CRC16 crc(payload);
-        // Serial.printf("CRC %d\n", crc.getCRC());
+        crcArray.push_back(data);
+        // CRC16 crc;
+        // Serial.printf("crc %d\n", crc.getCRC());
+        // if(data == crc.getCRC()) {
+        //   currentState = State::CRC;
+        // } else {
+        //   initState();
+        // }
 
       } else {
         currentPayloadSize++;
@@ -205,7 +213,16 @@ void trameAnalyzer() {
       }
       break;
     case State::CRC:
-      currentState = State::END;
+      for(int i = 0; i < payloadSize; i++) {
+        crc.add(payload[i]);
+      }
+      // crcArray.push_back(data); // pas oblige, on peut juste garder la derniere et lui ajouter data (pas besoin de vecteur)
+      // CRC16 crc;
+      if((crcArray[0] << 8) | (crcArray[1] & 0b11111111) == crc.getCRC()) {
+        currentState = State::END;
+      } else {
+        initState();
+      }
       break;
     case State::END:
         if(data == START_END) {
@@ -224,9 +241,9 @@ void trameAnalyzer() {
 }
 
 std::vector<uint8_t> createMessage(uint8_t *payloadArray, int size) {
-  // CRC16 crc;
-  // crc.add(payloadArray, size);
-  // uint16_t crcVal = crc.getCRC();
+  CRC16 crc;
+  crc.add(payloadArray, size);
+  uint16_t crcVal = crc.getCRC();
 
   std::vector<uint8_t> message{};
   
@@ -237,11 +254,11 @@ std::vector<uint8_t> createMessage(uint8_t *payloadArray, int size) {
   for(int i = 0; i < size; i++) {                 // payload
     message.push_back(payloadArray[i]);
   }
-  message.push_back(0b00000000);
-  message.push_back(0b00000000);
+  // message.push_back(0b00000000);
+  // message.push_back(0b00000000);
 
-  // message.push_back((crcVal >> 8) & 0b11111111);  // CRC
-  // message.push_back(crcVal & 0b11111111);         // CRC
+  message.push_back((crcVal >> 8) & 0b11111111);  // CRC
+  message.push_back(crcVal & 0b11111111);         // CRC
   message.push_back(START_END);
 
   return message;

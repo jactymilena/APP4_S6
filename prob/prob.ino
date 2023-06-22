@@ -14,6 +14,11 @@ const int HALF_PERIOD = 500;
 const int THRESHOLD_PERIOD = 280;
 const int TIME_BETWEEN_PERIODS = 5000 ; // en micro
 
+// trame components
+const uint8_t PREAMBLE = 0b1010101;
+const uint8_t START_END = 0b01111110;
+
+
 const TickType_t xDelay = TIME_BETWEEN_PERIODS / 1000 * portTICK_PERIOD_MS; // en millis
 
 std::vector<uint8_t> buffer{};
@@ -26,7 +31,17 @@ unsigned long timer;
 unsigned long lastChangeTime = 0;
 bool checkPeriod = false;
 volatile bool receivedBit = false;
-std::mutex m;
+int messageIndex = 0;
+
+// Message State Machine
+ enum class State {
+    PREAMBLE,
+    START,
+    HEADER,
+    PAYLOAD,
+    CRC,
+    END
+};
 
 // Define functions
 void receivePulse();  
@@ -97,6 +112,11 @@ void sendOne() {
 void addBit(int bit) {
   buffer.push_back(bit); 
   checkPeriod = false;
+
+  messageIndex++;
+  if(messageIndex % 8 == 0) {
+    trameAnalyzer();
+  }
 }
 
 void sendByte(uint8_t bits) {
@@ -107,6 +127,50 @@ void sendByte(uint8_t bits) {
     sendPulse(val);
     vTaskDelay(xDelay);
   }
+}
+
+void trameAnalyzer() {
+  Serial.printf("buffer size %d\n", buffer.size());
+//   switch(currentState){
+//     case PREAMBLE:
+//         if(data == "01010101"){
+//             currentState = State::START;
+//         }
+//         break;
+        
+//     case START:
+//         if(data == "01111110" && lastState == PREAMBLE) {
+//             currentState = State::HEADER;
+//         } else {
+//             // Revenir à l'état initial
+//             currentState = State::PREAMBLE;
+//         }
+//         break;
+        
+//     case HEADER:
+//         currentState = State::Lenght;
+//         break;
+    
+//     case Lenght:
+//         currentState = State::PAYLOAD;
+//         break;
+    
+//     case PAYLOAD:
+//         currentState = State::CRC;
+//         break;
+    
+//     case CRC:
+//         currentState = State::END;
+//         break;
+    
+//     case END:
+//         if(data == "01111110")
+//         // Revenir à l'état initial
+//         currentState = State::PREAMBLE;
+//         payload.clear();
+//         payloadLength = 0;
+//         break;
+//   }
 }
 
 /*--------------------------------------------------*/
@@ -150,6 +214,7 @@ void TaskReceive(void *pvParameters) {
           // Serial.println(" ");
         }
       } else  { // first bit TODO : a revoir, marche pas pour le zero et le un en meme temps
+          addBit(0);
           if(rxVal == 0)
             addBit(!rxVal);
       }
@@ -161,14 +226,14 @@ void TaskReceive(void *pvParameters) {
 
 void TaskSend(void *pvParameters) {  
   uint8_t message[7] = {
-    0b1010101, // preamble
-    0b01111110, // start
+    PREAMBLE, // preamble
+    START_END, // start
     0b10000001, // header - Type + Flags
     // size, // header - payload size
     0b11011101, // payload
     0b00000000,
     0b00000000,
-    0b01111110 // end
+    START_END // end
   };
 
   for(int i = 0; i < 7; i++) {

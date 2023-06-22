@@ -22,6 +22,7 @@ const uint8_t START_END = 0b01111110;
 const TickType_t xDelay = TIME_BETWEEN_PERIODS / 1000 * portTICK_PERIOD_MS; // en millis
 
 std::vector<uint8_t> buffer{};
+std::vector<uint8_t> payload{};
 
 unsigned long timer;
 unsigned long lastChangeTime = 0;
@@ -140,17 +141,25 @@ uint8_t convertBufferToByte() {
   return val;
 }
 
+void printBuffer() {
+  Serial.printf("buffer START");
+  for(int i = 0; i < buffer.size(); i++) {
+    Serial.printf(" %d", buffer[i]);
+  }
+  Serial.println(" END received");
+}
+
 void trameAnalyzer() {
   uint8_t data = convertBufferToByte();
-  static int payloadLength;
+  static int currentPayloadSize;
   static int payloadSize;
-  // Serial.printf("currState %d data %d\n", currentState, data);
-
+  Serial.printf("currState %d data %d\n", currentState, data);
+  // TODO : fonction pour reinitialiser idle (clear le buffer et tout remettre, checkPeriod, ignorer erreur)
   switch(currentState) {
     case State::IDLE:
       if(data == PREAMBLE) {
         currentState = State::PREAMBLE;
-        payloadLength = 0;
+        currentPayloadSize = 0;
         payloadSize = 0;
       }
       break;
@@ -165,21 +174,21 @@ void trameAnalyzer() {
       currentState = State::HEADER_FLAG;
       break;
     case State::HEADER_FLAG:
-      currentState = State::HEADER_SIZE;
-      break;
-    case State::HEADER_SIZE:
       if(data + BASE_TRAME_SIZE > MAX_SIZE) {
         currentState = State::IDLE;
       } else {
         payloadSize = data;
-        currentState = State::PAYLOAD;
+        currentState = State::HEADER_SIZE;
       }
       break;
+    case State::HEADER_SIZE:
+      currentState = State::PAYLOAD;
+      break;
     case State::PAYLOAD:
-      payloadLength++;
-      if(payloadLength == payloadSize) {
+      currentPayloadSize++;
+      if(currentPayloadSize == payloadSize) {
         currentState = State::CRC;
-        // for() print payload (shift pour le mettre enseble)
+        // for() print payload (shift pour le mettre enseble) ou mettre dans structure
       }
       break;
     case State::CRC:
@@ -188,10 +197,11 @@ void trameAnalyzer() {
       break;
     case State::END:
         if(data == START_END) {
-          // ajouter dans trame 
+          // ajouter dans trame structure
         }
         // Revenir à l'état initial
         currentState = State::IDLE;
+        printBuffer();
         buffer.clear();
         break;
   }
@@ -263,13 +273,6 @@ void TaskSend(void *pvParameters) {
   for(int i = 0; i < 8; i++) {
     sendByte(message[i]);
   } 
-
-  Serial.printf("buffer START");
-  for(int i = 0; i < buffer.size(); i++) {
-    Serial.printf(" %d", buffer[i]);
-  }
-  Serial.println(" END received");
-
 
   for (;;) {
     vTaskDelay(xDelay);

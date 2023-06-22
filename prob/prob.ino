@@ -61,13 +61,16 @@ uint8_t* createTrame(uint8_t* data, uint8_t size) {
     0x7E, // start
     0x00, // header - Type + Flags
     size, // header - payload size
+    0x07, // payload
+    0x00,
+    0x00,
     0x7E // end
-  };// 
+    };// 
 
   return trame;
 } 
 
-void sendPulse(int value) {
+void sendPulse(int value) { // 0, 1
   digitalWrite(PIN_OUT, value);
   delayMicroseconds(HALF_PERIOD);
 
@@ -102,11 +105,12 @@ void addBit(int bit) {
   Serial.println(" END");
 }
 
-// void sendTrame(uint8_t *trame, int trame_size) {
-//   for(int i = 0; i < trame_size; i++) {
-
-//   }
-// }
+void sendByte(uint8_t bits) {
+  for(int i = 7; i >= 0; i--) {
+    sendPulse((bits >> i) & 0x01);
+    vTaskDelay(xDelay);
+  }
+}
 
 /*--------------------------------------------------*/
 /*-------------------- Interrups -------------------*/
@@ -159,25 +163,22 @@ void TaskReceive(void *pvParameters) {
 }
 
 void TaskSend(void *pvParameters) {  
-  // const TickType_t xDelay = 20;
-  for(int i = 0; i < 5; i++) {
-      sendOne();
-      vTaskDelay(xDelay);
-      sendZero();
-      vTaskDelay(xDelay);
-  }
 
-  for(int i = 0; i < 5; i++) {
-      sendZero();
-      vTaskDelay(xDelay);
 
-      // delayMicroseconds(20);
-  }
+  uint8_t message[1] = {
+    0b1010101 // preamble
+    // 0x7E, // start
+    // 0x00, // header - Type + Flags
+    // size, // header - payload size
+    // 0x07, // payload
+    // 0x00,
+    // 0x00,
+    // 0x7E // end
+  };// 01010101010 //  01010101010 >> 7
+  sendByte(message[0]);
+
 
   for (;;) {
-    // sendOne();
-    // vTaskDelay(xDelay);
-    // sendZero();
     vTaskDelay(xDelay);
   }
 }

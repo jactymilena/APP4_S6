@@ -29,6 +29,8 @@ unsigned long lastChangeTime = 0;
 bool checkPeriod = false;
 volatile bool receivedBit = false;
 int messageIndex = 0;
+int currentPayloadSize;
+int payloadSize;
 
 // Message State Machine
 enum class State {
@@ -149,25 +151,29 @@ void printBuffer() {
   Serial.println(" END received");
 }
 
+void initState() {
+  currentState = State::IDLE;
+  currentPayloadSize = 0;
+  payloadSize = 0;
+  buffer.clear();
+}
+
 void trameAnalyzer() {
   uint8_t data = convertBufferToByte();
-  static int currentPayloadSize;
-  static int payloadSize;
-  Serial.printf("currState %d data %d\n", currentState, data);
+  
+  // Serial.printf("currState %d data %d\n", currentState, data);
   // TODO : fonction pour reinitialiser idle (clear le buffer et tout remettre, checkPeriod, ignorer erreur)
   switch(currentState) {
     case State::IDLE:
       if(data == PREAMBLE) {
         currentState = State::PREAMBLE;
-        currentPayloadSize = 0;
-        payloadSize = 0;
       }
       break;
     case State::PREAMBLE:
       if(data == START_END) {
         currentState = State::START;
       } else {
-        currentState = State::IDLE;
+        initState();
       }
       break;
     case State::START:
@@ -175,7 +181,7 @@ void trameAnalyzer() {
       break;
     case State::HEADER_FLAG:
       if(data + BASE_TRAME_SIZE > MAX_SIZE) {
-        currentState = State::IDLE;
+        initState();
       } else {
         payloadSize = data;
         currentState = State::HEADER_SIZE;
@@ -183,12 +189,16 @@ void trameAnalyzer() {
       break;
     case State::HEADER_SIZE:
       currentState = State::PAYLOAD;
+      currentPayloadSize++;
+      payload.push_back(data);
       break;
     case State::PAYLOAD:
-      currentPayloadSize++;
       if(currentPayloadSize == payloadSize) {
         currentState = State::CRC;
         // for() print payload (shift pour le mettre enseble) ou mettre dans structure
+      } else {
+        currentPayloadSize++;
+        payload.push_back(data);
       }
       break;
     case State::CRC:
@@ -198,11 +208,15 @@ void trameAnalyzer() {
     case State::END:
         if(data == START_END) {
           // ajouter dans trame structure
+          // print payload
+          Serial.printf("Payload ");
+          for(int i = 0; i < payload.size(); i++) {
+            Serial.printf(" %d ", payload[i]);
+          }
         }
         // Revenir à l'état initial
-        currentState = State::IDLE;
         printBuffer();
-        buffer.clear();
+        initState();
         break;
   }
 }

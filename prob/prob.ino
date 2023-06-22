@@ -11,7 +11,7 @@ const int SEND_CORE = 1;
 const int ZERO_MODE = 0;
 const int ONE_MODE = 1;
 const int HALF_PERIOD = 500;
-const int THRESHOLD_PERIOD = 200;
+const int THRESHOLD_PERIOD = 280;
 const int TIME_BETWEEN_PERIODS = 5000 ; // en micro
 
 const TickType_t xDelay = TIME_BETWEEN_PERIODS / 1000 * portTICK_PERIOD_MS; // en millis
@@ -23,9 +23,9 @@ int valOut;
 unsigned long duration;
 
 unsigned long timer;
-unsigned long lastChangeTime;
-bool checkPeriod;
-volatile bool receivedBit;
+unsigned long lastChangeTime = 0;
+bool checkPeriod = false;
+volatile bool receivedBit = false;
 std::mutex m;
 
 // Define functions
@@ -47,9 +47,6 @@ void setup() {
   // Send Task
   xTaskCreate(TaskSend, "Send Trame", 2048, NULL, 3,  NULL);
 
-  lastChangeTime = 0;
-  checkPeriod = false;
-  receivedBit = false;
 }
 
 void loop() { }
@@ -166,10 +163,9 @@ void TaskSend(void *pvParameters) {
   for(int i = 0; i < 5; i++) {
       sendOne();
       vTaskDelay(xDelay);
-      // sendZero();
-      // vTaskDelay(xDelay);
-  } // 1 0 1 0 1 0 1 0 1 0 0 0 0 0 0 
-    // 1   1 0 1 0 1 0 1 0 0 0 0 0 0
+      sendZero();
+      vTaskDelay(xDelay);
+  }
 
   for(int i = 0; i < 5; i++) {
       sendZero();

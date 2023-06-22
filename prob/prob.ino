@@ -97,17 +97,14 @@ void sendOne() {
 void addBit(int bit) {
   buffer.push_back(bit); 
   checkPeriod = false;
-
-  Serial.printf("buffer START");
-  for(int i = 0; i < buffer.size(); i++) {
-    Serial.printf(" %d", buffer[i]);
-  }
-  Serial.println(" END");
 }
 
 void sendByte(uint8_t bits) {
+  int val;
   for(int i = 7; i >= 0; i--) {
-    sendPulse((bits >> i) & 0x01);
+    val = (bits >> i) & 0x01;
+    // Serial.printf("val %d ", val)
+    sendPulse(val);
     vTaskDelay(xDelay);
   }
 }
@@ -134,23 +131,23 @@ void TaskReceive(void *pvParameters) {
 
     if(!checkPeriod && (periodElapse >= HALF_PERIOD*2 + TIME_BETWEEN_PERIODS - THRESHOLD_PERIOD) && (periodElapse <= HALF_PERIOD*2 + TIME_BETWEEN_PERIODS + THRESHOLD_PERIOD)) {
         checkPeriod = true;
-        Serial.printf("if diff %d\n", periodElapse);
+        // Serial.printf("if diff %d\n", periodElapse);
     }
 
     if(receivedBit) {
       receivedBit = false;
       rxVal = digitalRead(PIN_IN);
       
-      Serial.printf("diff %6d rx  %d ", periodElapse, rxVal);
+      // Serial.printf("diff %6d rx %d curr %6d last %6d ", periodElapse, rxVal, currentTime, lastChangeTime);
 
       if(buffer.size() != 0) {
         if(checkPeriod) {
-          if(periodElapse >= HALF_PERIOD - THRESHOLD_PERIOD || buffer.size() == 0) { // one period has pass
+          if(periodElapse >= HALF_PERIOD - THRESHOLD_PERIOD) { // one period has pass
             addBit(!rxVal);
           }
         } else {
           checkPeriod = true;
-          Serial.println(" ");
+          // Serial.println(" ");
         }
       } else  { // first bit TODO : a revoir, marche pas pour le zero et le un en meme temps
           if(rxVal == 0)
@@ -163,19 +160,26 @@ void TaskReceive(void *pvParameters) {
 }
 
 void TaskSend(void *pvParameters) {  
-
-
-  uint8_t message[1] = {
-    0b1010101 // preamble
-    // 0x7E, // start
-    // 0x00, // header - Type + Flags
+  uint8_t message[7] = {
+    0b1010101, // preamble
+    0b01111110, // start
+    0b10000001, // header - Type + Flags
     // size, // header - payload size
-    // 0x07, // payload
-    // 0x00,
-    // 0x00,
-    // 0x7E // end
-  };// 01010101010 //  01010101010 >> 7
-  sendByte(message[0]);
+    0b11011101, // payload
+    0b00000000,
+    0b00000000,
+    0b01111110 // end
+  };
+
+  for(int i = 0; i < 7; i++) {
+    sendByte(message[i]);
+  } 
+
+  Serial.printf("buffer START");
+  for(int i = 0; i < buffer.size(); i++) {
+    Serial.printf(" %d", buffer[i]);
+  }
+  Serial.println(" END received");
 
 
   for (;;) {

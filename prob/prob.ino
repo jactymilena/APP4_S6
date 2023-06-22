@@ -23,10 +23,6 @@ const TickType_t xDelay = TIME_BETWEEN_PERIODS / 1000 * portTICK_PERIOD_MS; // e
 
 std::vector<uint8_t> buffer{};
 
-int valIn;
-int valOut;
-unsigned long duration;
-
 unsigned long timer;
 unsigned long lastChangeTime = 0;
 bool checkPeriod = false;
@@ -38,13 +34,16 @@ enum class State {
   IDLE,
   PREAMBLE,
   START,
-  HEADER,
+  HEADER_FLAG,
+  HEADER_SIZE,
   PAYLOAD,
   CRC,
   END
+  // FINAL_STATE
 };
 
 State currentState = State::IDLE;
+State lastState = State::IDLE;
 
 // Define functions
 void receivePulse();  
@@ -142,53 +141,59 @@ uint8_t convertBufferToByte() {
 }
 
 void trameAnalyzer() {
-  Serial.printf("buffer size %d currState %d\n", buffer.size(), currentState);
   uint8_t data = convertBufferToByte();
+  static int payloadLength;
+  static int payloadSize;
+  // Serial.printf("currState %d data %d\n", currentState, data);
+
   switch(currentState) {
     case State::IDLE:
       if(data == PREAMBLE) {
         currentState = State::PREAMBLE;
+        payloadLength = 0;
+        payloadSize = 0;
       }
       break;
-
-  //   case :
-  //       if(data == "01010101"){
-  //           
-  //       }
-  //       break;
-        
-  //   case START:
-  //       if(data == "01111110" && lastState == PREAMBLE) {
-  //           currentState = State::HEADER;
-  //       } else {
-  //           // Revenir à l'état initial
-  //           currentState = State::PREAMBLE;
-  //       }
-  //       break;
-        
-  //   case HEADER:
-  //       currentState = State::Lenght;
-  //       break;
-    
-  //   case Lenght:
-  //       currentState = State::PAYLOAD;
-  //       break;
-    
-  //   case PAYLOAD:
-  //       currentState = State::CRC;
-  //       break;
-    
-  //   case CRC:
-  //       currentState = State::END;
-  //       break;
-    
-  //   case END:
-  //       if(data == "01111110")
-  //       // Revenir à l'état initial
-  //       currentState = State::PREAMBLE;
-  //       payload.clear();
-  //       payloadLength = 0;
-  //       break;
+    case State::PREAMBLE:
+      if(data == START_END) {
+        currentState = State::START;
+      } else {
+        currentState = State::IDLE;
+      }
+      break;
+    case State::START:
+      currentState = State::HEADER_FLAG;
+      break;
+    case State::HEADER_FLAG:
+      currentState = State::HEADER_SIZE;
+      break;
+    case State::HEADER_SIZE:
+      if(data + BASE_TRAME_SIZE > MAX_SIZE) {
+        currentState = State::IDLE;
+      } else {
+        payloadSize = data;
+        currentState = State::PAYLOAD;
+      }
+      break;
+    case State::PAYLOAD:
+      payloadLength++;
+      if(payloadLength == payloadSize) {
+        currentState = State::CRC;
+        // for() print payload (shift pour le mettre enseble)
+      }
+      break;
+    case State::CRC:
+      // calcul crc
+      currentState = State::END;
+      break;
+    case State::END:
+        if(data == START_END) {
+          // ajouter dans trame 
+        }
+        // Revenir à l'état initial
+        currentState = State::IDLE;
+        buffer.clear();
+        break;
   }
 }
 
@@ -244,18 +249,18 @@ void TaskReceive(void *pvParameters) {
 }
 
 void TaskSend(void *pvParameters) {  
-  uint8_t message[7] = {
+  uint8_t message[8] = {
     PREAMBLE, // preamble
     START_END, // start
     0b10000001, // header - Type + Flags
-    // size, // header - payload size
+    0b00000001, // header - payload size
     0b11011101, // payload
     0b00000000,
     0b00000000,
     START_END // end
   };
 
-  for(int i = 0; i < 7; i++) {
+  for(int i = 0; i < 8; i++) {
     sendByte(message[i]);
   } 
 

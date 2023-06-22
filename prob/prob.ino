@@ -1,6 +1,6 @@
 #include <vector>
 #include <atomic>
-#include <mutex>
+#include <bitset>
 
 const int MAX_SIZE = 80;
 const int BASE_TRAME_SIZE = 7;
@@ -34,14 +34,17 @@ volatile bool receivedBit = false;
 int messageIndex = 0;
 
 // Message State Machine
- enum class State {
-    PREAMBLE,
-    START,
-    HEADER,
-    PAYLOAD,
-    CRC,
-    END
+enum class State {
+  IDLE,
+  PREAMBLE,
+  START,
+  HEADER,
+  PAYLOAD,
+  CRC,
+  END
 };
+
+State currentState = State::IDLE;
 
 // Define functions
 void receivePulse();  
@@ -61,7 +64,6 @@ void setup() {
   xTaskCreate(TaskReceive, "Receive Trame", 2048, NULL, 2,  NULL);
   // Send Task
   xTaskCreate(TaskSend, "Send Trame", 2048, NULL, 3,  NULL);
-
 }
 
 void loop() { }
@@ -129,48 +131,64 @@ void sendByte(uint8_t bits) {
   }
 }
 
+uint8_t convertBufferToByte() {
+  uint8_t val;
+  int j = 7;
+  for(int i = messageIndex - 8; i < messageIndex; i++) {
+    val |= buffer[i] << j;
+    j--;
+  } 
+  
+  return val;
+}
+
 void trameAnalyzer() {
   Serial.printf("buffer size %d\n", buffer.size());
-//   switch(currentState){
-//     case PREAMBLE:
-//         if(data == "01010101"){
-//             currentState = State::START;
-//         }
-//         break;
+  convertBufferToByte();
+  // switch(currentState){
+  //   case State::IDLE:
+
+
+
+  //   case PREAMBLE:
+  //       if(data == "01010101"){
+  //           currentState = State::START;
+  //       }
+  //       break;
         
-//     case START:
-//         if(data == "01111110" && lastState == PREAMBLE) {
-//             currentState = State::HEADER;
-//         } else {
-//             // Revenir à l'état initial
-//             currentState = State::PREAMBLE;
-//         }
-//         break;
+  //   case START:
+  //       if(data == "01111110" && lastState == PREAMBLE) {
+  //           currentState = State::HEADER;
+  //       } else {
+  //           // Revenir à l'état initial
+  //           currentState = State::PREAMBLE;
+  //       }
+  //       break;
         
-//     case HEADER:
-//         currentState = State::Lenght;
-//         break;
+  //   case HEADER:
+  //       currentState = State::Lenght;
+  //       break;
     
-//     case Lenght:
-//         currentState = State::PAYLOAD;
-//         break;
+  //   case Lenght:
+  //       currentState = State::PAYLOAD;
+  //       break;
     
-//     case PAYLOAD:
-//         currentState = State::CRC;
-//         break;
+  //   case PAYLOAD:
+  //       currentState = State::CRC;
+  //       break;
     
-//     case CRC:
-//         currentState = State::END;
-//         break;
+  //   case CRC:
+  //       currentState = State::END;
+  //       break;
     
-//     case END:
-//         if(data == "01111110")
-//         // Revenir à l'état initial
-//         currentState = State::PREAMBLE;
-//         payload.clear();
-//         payloadLength = 0;
-//         break;
-//   }
+  //   case END:
+  //       if(data == "01111110")
+  //       // Revenir à l'état initial
+  //       currentState = State::PREAMBLE;
+  //       payload.clear();
+  //       payloadLength = 0;
+  //       break;
+  // }
 }
 
 /*--------------------------------------------------*/

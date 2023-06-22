@@ -1,6 +1,7 @@
 #include <vector>
 #include <atomic>
 #include <bitset>
+#include "CRC16.h"
 
 const int MAX_SIZE = 80;
 const int BASE_TRAME_SIZE = 7;
@@ -63,9 +64,9 @@ void setup() {
   // Receive interrupts
   attachInterrupt(digitalPinToInterrupt(PIN_IN), receivePulse, CHANGE);
   // Receive Task
-  xTaskCreate(TaskReceive, "Receive Trame", 2048, NULL, 2,  NULL);
+  xTaskCreate(TaskReceive, "Receive Trame", 2048, NULL, 3,  NULL);
   // Send Task
-  xTaskCreate(TaskSend, "Send Trame", 2048, NULL, 3,  NULL);
+  xTaskCreate(TaskSend, "Send Trame", 2048, NULL, 2,  NULL);
 }
 
 void loop() { }
@@ -195,14 +196,15 @@ void trameAnalyzer() {
     case State::PAYLOAD:
       if(currentPayloadSize == payloadSize) {
         currentState = State::CRC;
-        // for() print payload (shift pour le mettre enseble) ou mettre dans structure
+        // CRC16 crc(payload);
+        // Serial.printf("CRC %d\n", crc.getCRC());
+
       } else {
         currentPayloadSize++;
         payload.push_back(data);
       }
       break;
     case State::CRC:
-      // calcul crc
       currentState = State::END;
       break;
     case State::END:
@@ -219,6 +221,30 @@ void trameAnalyzer() {
         initState();
         break;
   }
+}
+
+std::vector<uint8_t> createMessage(uint8_t *payloadArray, int size) {
+  // CRC16 crc;
+  // crc.add(payloadArray, size);
+  // uint16_t crcVal = crc.getCRC();
+
+  std::vector<uint8_t> message{};
+  
+  message.push_back(PREAMBLE);                    // preambule
+  message.push_back(START_END);                   // start
+  message.push_back(0b10000001);                  // header | Type + Flag
+  message.push_back(size);                        // header | Size
+  for(int i = 0; i < size; i++) {                 // payload
+    message.push_back(payloadArray[i]);
+  }
+  message.push_back(0b00000000);
+  message.push_back(0b00000000);
+
+  // message.push_back((crcVal >> 8) & 0b11111111);  // CRC
+  // message.push_back(crcVal & 0b11111111);         // CRC
+  message.push_back(START_END);
+
+  return message;
 }
 
 /*--------------------------------------------------*/
@@ -273,19 +299,15 @@ void TaskReceive(void *pvParameters) {
 }
 
 void TaskSend(void *pvParameters) {  
-  uint8_t message[11] = {
-    PREAMBLE, // preamble
-    START_END, // start
-    0b10000001, // header - Type + Flags
-    0b000000100, // header - payload size
-    0b11011101, // payload
-    0b11011111, // payload
-    0b00011101, // payload
-    0b00000111, // payload
-    0b00000000,
-    0b00000000,
-    START_END // end
+  const uint8_t size = 4;
+  uint8_t payloadArray[size] = {
+    0b11011101, 
+    0b11011111,
+    0b00011101,
+    0b00000111,
   };
+  
+  std::vector<uint8_t> message = createMessage(payloadArray, size);
 
   for(int i = 0; i < 11; i++) {
     sendByte(message[i]);

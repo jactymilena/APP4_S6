@@ -273,18 +273,21 @@ void TaskReceive(void *pvParameters) {
 }
 
 void TaskSend(void *pvParameters) {  
-  uint8_t message[8] = {
+  uint8_t message[11] = {
     PREAMBLE, // preamble
     START_END, // start
     0b10000001, // header - Type + Flags
-    0b00000001, // header - payload size
+    0b000000100, // header - payload size
     0b11011101, // payload
+    0b11011111, // payload
+    0b00011101, // payload
+    0b00000111, // payload
     0b00000000,
     0b00000000,
     START_END // end
   };
 
-  for(int i = 0; i < 8; i++) {
+  for(int i = 0; i < 11; i++) {
     sendByte(message[i]);
   } 
 

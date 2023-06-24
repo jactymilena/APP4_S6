@@ -3,28 +3,25 @@
 #include <bitset>
 #include "CRC16.h"
 
+// Trame sizes
 const int MAX_SIZE = 80;
 const int BASE_TRAME_SIZE = 7;
+// RX and TX pins
 const int PIN_OUT = 32; 
 const int PIN_IN = 33;
-const int RECEIVE_CORE = 0;
-const int SEND_CORE = 1;
-const int ZERO_MODE = 0;
-const int ONE_MODE = 1;
-const int HALF_PERIOD = 500;
-const int THRESHOLD_PERIOD = 280;
+// 
+const int HALF_PERIOD = 500;            // en micro
+const int THRESHOLD_PERIOD = 280;       // en micro
 const int TIME_BETWEEN_PERIODS = 5000 ; // en micro
+const TickType_t xDelay = TIME_BETWEEN_PERIODS / 1000 * portTICK_PERIOD_MS; // en millis
+
 
 // trame components
 const uint8_t PREAMBLE = 0b1010101;
 const uint8_t START_END = 0b01111110;
 
-
-const TickType_t xDelay = TIME_BETWEEN_PERIODS / 1000 * portTICK_PERIOD_MS; // en millis
-
 std::vector<uint8_t> buffer{};
 std::vector<uint8_t> payload{}; // on a deja un index, pourrait etre une array
-std::vector<uint8_t> crcArray{};
 
 unsigned long timer;
 unsigned long lastChangeTime = 0;
@@ -99,22 +96,6 @@ void sendPulse(int value) { // 0, 1
   delayMicroseconds(HALF_PERIOD);
 }
 
-void sendZero() {
-  digitalWrite(PIN_OUT, LOW);
-  delayMicroseconds(HALF_PERIOD);
-
-  digitalWrite(PIN_OUT, HIGH);
-  delayMicroseconds(HALF_PERIOD);
-}
-
-void sendOne() {
-  digitalWrite(PIN_OUT, HIGH);
-  delayMicroseconds(HALF_PERIOD);
-
-  digitalWrite(PIN_OUT, LOW);
-  delayMicroseconds(HALF_PERIOD);
-}
-
 void addBit(int bit) {
   buffer.push_back(bit); 
   checkPeriod = false;
@@ -163,6 +144,7 @@ void initState() {
 void trameAnalyzer() {
   uint8_t data = convertBufferToByte();
   CRC16 crc;
+  static uint16_t crcVal;
   
   // Serial.printf("currState %d data %d\n", currentState, data);
   // TODO : fonction pour reinitialiser idle (clear le buffer et tout remettre, checkPeriod, ignorer erreur)
@@ -198,15 +180,7 @@ void trameAnalyzer() {
     case State::PAYLOAD:
       if(currentPayloadSize == payloadSize) {
         currentState = State::CRC;
-        crcArray.push_back(data);
-        // CRC16 crc;
-        // Serial.printf("crc %d\n", crc.getCRC());
-        // if(data == crc.getCRC()) {
-        //   currentState = State::CRC;
-        // } else {
-        //   initState();
-        // }
-
+        crcVal = data << 8;
       } else {
         currentPayloadSize++;
         payload.push_back(data);
@@ -216,9 +190,8 @@ void trameAnalyzer() {
       for(int i = 0; i < payloadSize; i++) {
         crc.add(payload[i]);
       }
-      // crcArray.push_back(data); // pas oblige, on peut juste garder la derniere et lui ajouter data (pas besoin de vecteur)
-      // CRC16 crc;
-      if((crcArray[0] << 8) | (crcArray[1] & 0b11111111) == crc.getCRC()) {
+      crcVal |= data & 0b11111111;
+      if(crcVal == crc.getCRC()) {
         currentState = State::END;
       } else {
         initState();
@@ -246,12 +219,13 @@ std::vector<uint8_t> createMessage(uint8_t *payloadArray, int size) {
   uint16_t crcVal = crc.getCRC();
 
   std::vector<uint8_t> message{};
+  message.reserve(MAX_SIZE);
   
   message.push_back(PREAMBLE);                    // preambule
   message.push_back(START_END);                   // start
   message.push_back(0b10000001);                  // header | Type + Flag
   message.push_back(size);                        // header | Size
-  for(int i = 0; i < size; i++) {                 // payload
+  for(int i = 0; i < size; ++i) {                 // payload
     message.push_back(payloadArray[i]);
   }
   // message.push_back(0b00000000);
@@ -284,16 +258,15 @@ void TaskReceive(void *pvParameters) {
     auto currentTime = micros();
     periodElapse = currentTime - lastChangeTime;
 
-    if(!checkPeriod && (periodElapse >= HALF_PERIOD*2 + TIME_BETWEEN_PERIODS - THRESHOLD_PERIOD) && (periodElapse <= HALF_PERIOD*2 + TIME_BETWEEN_PERIODS + THRESHOLD_PERIOD)) {
+    if(!checkPeriod && (periodElapse >= HALF_PERIOD*2 + TIME_BETWEEN_PERIODS - THRESHOLD_PERIOD) &&
+       (periodElapse <= HALF_PERIOD*2 + TIME_BETWEEN_PERIODS + THRESHOLD_PERIOD)) {
         checkPeriod = true;
-        // Serial.printf("if diff %d\n", periodElapse);
     }
 
     if(receivedBit) {
       receivedBit = false;
       rxVal = digitalRead(PIN_IN);
       
-      // Serial.printf("diff %6d rx %d curr %6d last %6d ", periodElapse, rxVal, currentTime, lastChangeTime);
 
       if(buffer.size() != 0) {
         if(checkPeriod) {
@@ -302,7 +275,6 @@ void TaskReceive(void *pvParameters) {
           }
         } else {
           checkPeriod = true;
-          // Serial.println(" ");
         }
       } else  { // first bit TODO : a revoir, marche pas pour le zero et le un en meme temps
           addBit(0);
@@ -326,7 +298,7 @@ void TaskSend(void *pvParameters) {
   
   std::vector<uint8_t> message = createMessage(payloadArray, size);
 
-  for(int i = 0; i < 11; i++) {
+  for(int i = 0; i < 11; ++i) {
     sendByte(message[i]);
   } 
 

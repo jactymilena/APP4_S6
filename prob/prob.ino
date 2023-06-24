@@ -9,14 +9,13 @@ const int BASE_TRAME_SIZE = 7;
 // RX and TX pins
 const int PIN_OUT = 32; 
 const int PIN_IN = 33;
-// 
+// Time constants
 const int HALF_PERIOD = 500;            // en micro
 const int THRESHOLD_PERIOD = 280;       // en micro
-const int TIME_BETWEEN_PERIODS = 5000 ; // en micro
-const TickType_t xDelay = TIME_BETWEEN_PERIODS / 1000 * portTICK_PERIOD_MS; // en millis
+const int TIME_BETWEEN_BITS = 5000 ; // en micro
+const TickType_t xDelay = TIME_BETWEEN_BITS / 1000 * portTICK_PERIOD_MS; // en millis
 
-
-// trame components
+// Trame components
 const uint8_t PREAMBLE = 0b1010101;
 const uint8_t START_END = 0b01111110;
 
@@ -26,8 +25,8 @@ std::vector<uint8_t> payload{}; // on a deja un index, pourrait etre une array
 unsigned long timer;
 unsigned long lastChangeTime = 0;
 bool checkPeriod = false;
-volatile bool receivedBit = false;
-int messageIndex = 0;
+std::atomic<bool> receivedBit(false);
+int bufferIndex = 0;
 int currentPayloadSize;
 int payloadSize;
 
@@ -41,16 +40,23 @@ enum class State {
   PAYLOAD,
   CRC,
   END
-  // FINAL_STATE
 };
 
 State currentState = State::IDLE;
 State lastState = State::IDLE;
 
-// Define functions
+// Functions Prototypes
 void receivePulse();  
 void TaskReceive(void *pvParameters);
 void TaskSend(void *pvParameters);
+uint8_t convertBufferToByte();
+void printBuffer();
+void addBit(int bit);
+void analyseTrame();
+void initState();
+std::vector<uint8_t> createMessage(uint8_t *payloadArray, int size);
+void sendPulse(int value);
+void sendByte(uint8_t bits);
 
 void setup() {
   pinMode(PIN_OUT, OUTPUT);
@@ -69,56 +75,14 @@ void setup() {
 
 void loop() { }
 
-uint8_t* createTrame(uint8_t* data, uint8_t size) {
-  // std::vector<uint8_t> trame( (BASE_TRAME_SIZE + size) % MAX_SIZE);
-  int trame_size = BASE_TRAME_SIZE + size;
-  if (trame_size > MAX_SIZE) trame_size = MAX_SIZE;
-
-  uint8_t trame[trame_size] = {
-    0x55, // preamble
-    0x7E, // start
-    0x00, // header - Type + Flags
-    size, // header - payload size
-    0x07, // payload
-    0x00,
-    0x00,
-    0x7E // end
-    };// 
-
-  return trame;
-} 
-
-void sendPulse(int value) { // 0, 1
-  digitalWrite(PIN_OUT, value);
-  delayMicroseconds(HALF_PERIOD);
-
-  digitalWrite(PIN_OUT, !value);
-  delayMicroseconds(HALF_PERIOD);
-}
-
-void addBit(int bit) {
-  buffer.push_back(bit); 
-  checkPeriod = false;
-
-  messageIndex++;
-  if(messageIndex % 8 == 0) {
-    trameAnalyzer();
-  }
-}
-
-void sendByte(uint8_t bits) {
-  int val;
-  for(int i = 7; i >= 0; i--) {
-    val = (bits >> i) & 0x01;
-    sendPulse(val);
-    vTaskDelay(xDelay);
-  }
-}
+/*-----------------------------------------------------------*/
+/*-------------------- Receiver functions -------------------*/
+/*-----------------------------------------------------------*/
 
 uint8_t convertBufferToByte() {
   uint8_t val;
   int j = 7;
-  for(int i = messageIndex - 8; i < messageIndex; i++) {
+  for(int i = bufferIndex - 8; i < bufferIndex; i++) {
     val |= buffer[i] << j;
     j--;
   } 
@@ -134,20 +98,23 @@ void printBuffer() {
   Serial.println(" END received");
 }
 
-void initState() {
-  currentState = State::IDLE;
-  currentPayloadSize = 0;
-  payloadSize = 0;
-  buffer.clear();
+void addBit(int bit) {
+  buffer.push_back(bit); 
+  checkPeriod = false;
+  bufferIndex++;
+
+  if(bufferIndex % 8 == 0) {
+    analyseTrame();
+  }
 }
 
-void trameAnalyzer() {
+/*------- State Machine -------*/
+void analyseTrame() {
   uint8_t data = convertBufferToByte();
   CRC16 crc;
   static uint16_t crcVal;
   
   // Serial.printf("currState %d data %d\n", currentState, data);
-  // TODO : fonction pour reinitialiser idle (clear le buffer et tout remettre, checkPeriod, ignorer erreur)
   switch(currentState) {
     case State::IDLE:
       if(data == PREAMBLE) {
@@ -199,8 +166,6 @@ void trameAnalyzer() {
       break;
     case State::END:
         if(data == START_END) {
-          // ajouter dans trame structure
-          // print payload
           Serial.printf("Payload ");
           for(int i = 0; i < payload.size(); i++) {
             Serial.printf(" %d ", payload[i]);
@@ -212,6 +177,17 @@ void trameAnalyzer() {
         break;
   }
 }
+
+void initState() {
+  currentState = State::IDLE;
+  currentPayloadSize = 0;
+  payloadSize = 0;
+  buffer.clear();
+}
+
+/*---------------------------------------------------------*/
+/*-------------------- Sender functions -------------------*/
+/*---------------------------------------------------------*/
 
 std::vector<uint8_t> createMessage(uint8_t *payloadArray, int size) {
   CRC16 crc;
@@ -238,6 +214,23 @@ std::vector<uint8_t> createMessage(uint8_t *payloadArray, int size) {
   return message;
 }
 
+void sendPulse(int value) { // 0, 1
+  digitalWrite(PIN_OUT, value);
+  delayMicroseconds(HALF_PERIOD);
+
+  digitalWrite(PIN_OUT, !value);
+  delayMicroseconds(HALF_PERIOD);
+}
+
+void sendByte(uint8_t bits) {
+  int val;
+  for(int i = 7; i >= 0; i--) {
+    val = (bits >> i) & 0x01;
+    sendPulse(val);
+    vTaskDelay(xDelay);
+  }
+}
+
 /*--------------------------------------------------*/
 /*-------------------- Interrups -------------------*/
 /*--------------------------------------------------*/
@@ -258,15 +251,14 @@ void TaskReceive(void *pvParameters) {
     auto currentTime = micros();
     periodElapse = currentTime - lastChangeTime;
 
-    if(!checkPeriod && (periodElapse >= HALF_PERIOD*2 + TIME_BETWEEN_PERIODS - THRESHOLD_PERIOD) &&
-       (periodElapse <= HALF_PERIOD*2 + TIME_BETWEEN_PERIODS + THRESHOLD_PERIOD)) {
+    if(!checkPeriod && (periodElapse >= HALF_PERIOD*2 + TIME_BETWEEN_BITS - THRESHOLD_PERIOD) &&
+       (periodElapse <= HALF_PERIOD*2 + TIME_BETWEEN_BITS + THRESHOLD_PERIOD)) { // 1 0 or 0 1 transition
         checkPeriod = true;
     }
 
     if(receivedBit) {
       receivedBit = false;
       rxVal = digitalRead(PIN_IN);
-      
 
       if(buffer.size() != 0) {
         if(checkPeriod) {
@@ -276,10 +268,9 @@ void TaskReceive(void *pvParameters) {
         } else {
           checkPeriod = true;
         }
-      } else  { // first bit TODO : a revoir, marche pas pour le zero et le un en meme temps
+      } else  { // First bit 
           addBit(0);
-          if(rxVal == 0)
-            addBit(!rxVal);
+          if(rxVal == 0) addBit(!rxVal);
       }
 
       lastChangeTime = currentTime;

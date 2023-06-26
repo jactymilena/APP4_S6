@@ -20,14 +20,11 @@ const uint8_t PREAMBLE = 0b1010101;
 const uint8_t START_END = 0b01111110;
 
 std::vector<uint8_t> buffer{};
-std::vector<uint8_t> payload{}; // on a deja un index, pourrait etre une array
+std::vector<uint8_t> payload{};
 
-unsigned long timer;
 unsigned long lastChangeTime = 0;
 bool checkPeriod = false;
 std::atomic<bool> receivedBit(false);
-int bufferIndex = 0;
-int currentPayloadSize;
 int payloadSize;
 
 // Message State Machine
@@ -58,6 +55,7 @@ std::vector<uint8_t> createMessage(uint8_t *payloadArray, int size);
 void sendPulse(int value);
 void sendByte(uint8_t bits);
 
+
 void setup() {
   pinMode(PIN_OUT, OUTPUT);
   pinMode(PIN_IN, INPUT);
@@ -82,7 +80,7 @@ void loop() { }
 uint8_t convertBufferToByte() {
   uint8_t val;
   int j = 7;
-  for(int i = bufferIndex - 8; i < bufferIndex; i++) {
+  for(int i = buffer.size() - 8; i < buffer.size(); i++) {
     val |= buffer[i] << j;
     j--;
   } 
@@ -101,9 +99,8 @@ void printBuffer() {
 void addBit(int bit) {
   buffer.push_back(bit); 
   checkPeriod = false;
-  bufferIndex++;
 
-  if(bufferIndex % 8 == 0) {
+  if(buffer.size() % 8 == 0) {
     analyseTrame();
   }
 }
@@ -114,7 +111,6 @@ void analyseTrame() {
   CRC16 crc;
   static uint16_t crcVal;
   
-  // Serial.printf("currState %d data %d\n", currentState, data);
   switch(currentState) {
     case State::IDLE:
       if(data == PREAMBLE) {
@@ -125,7 +121,7 @@ void analyseTrame() {
       if(data == START_END) {
         currentState = State::START;
       } else {
-        Serial.printf("MISSING START - ");
+        Serial.printf("ERROR MISSING START - ");
         initState();
       }
       break;
@@ -134,7 +130,7 @@ void analyseTrame() {
       break;
     case State::HEADER_FLAG:
       if(data + BASE_TRAME_SIZE > MAX_SIZE) {
-        Serial.printf("MAX TRAME SIZE ERROR - ");
+        Serial.printf("ERROR MAX TRAME SIZE - ");
         initState();
       } else {
         payloadSize = data;
@@ -143,15 +139,13 @@ void analyseTrame() {
       break;
     case State::HEADER_SIZE:
       currentState = State::PAYLOAD;
-      currentPayloadSize++;
       payload.push_back(data);
       break;
     case State::PAYLOAD:
-      if(currentPayloadSize == payloadSize) {
+      if(payload.size() == payloadSize) {
         currentState = State::CRC;
         crcVal = data << 8;
       } else {
-        currentPayloadSize++;
         payload.push_back(data);
       }
       break;
@@ -174,10 +168,9 @@ void analyseTrame() {
             Serial.printf(" %d ", payload[i]);
           }
         } else {
-          Serial.printf("MISSING END ERROR - ");
+          Serial.printf("ERROR MISSING END - ");
         }
         // Revenir à l'état initial
-        // printBuffer();
         initState();
         break;
   }
@@ -186,18 +179,17 @@ void analyseTrame() {
 void initState() {
    Serial.println("State Machine Inital State - Waiting for preamble...");
   currentState = State::IDLE;
-  currentPayloadSize = 0;
   payloadSize = 0;
-  bufferIndex = 0;
   buffer.clear();
   payload.clear();
 }
+
 
 /*---------------------------------------------------------*/
 /*-------------------- Sender functions -------------------*/
 /*---------------------------------------------------------*/
 
-std::vector<uint8_t> createMessage(uint8_t *payloadArray, int size) {
+std::vector<uint8_t> createMessage(uint8_t *payloadArray, int size, bool isWrongCRC, bool hasStart, bool hasEnd) {
   CRC16 crc;
   crc.add(payloadArray, size);
   uint16_t crcVal = crc.getCRC();
@@ -206,18 +198,21 @@ std::vector<uint8_t> createMessage(uint8_t *payloadArray, int size) {
   message.reserve(MAX_SIZE);
   
   message.push_back(PREAMBLE);                    // preambule
-  message.push_back(START_END);                   // start
+  if(hasStart) message.push_back(START_END);      // start
   message.push_back(0b10000001);                  // header | Type + Flag
   message.push_back(size);                        // header | Size
   for(int i = 0; i < size; ++i) {                 // payload
     message.push_back(payloadArray[i]);
   }
-  // message.push_back(0b00000000);
-  // message.push_back(0b00000000);
 
-  message.push_back((crcVal >> 8) & 0b11111111);  // CRC
-  message.push_back(crcVal & 0b11111111);         // CRC
-  message.push_back(START_END);
+  if(isWrongCRC) {
+    message.push_back(0b00000000);
+    message.push_back(0b00000000);
+  } else {
+    message.push_back((crcVal >> 8) & 0b11111111);  // CRC
+    message.push_back(crcVal & 0b11111111);         // CRC
+  }
+  if(hasEnd) message.push_back(START_END);          // end
 
   return message;
 }
@@ -237,6 +232,18 @@ void sendByte(uint8_t bits) {
     sendPulse(val);
     vTaskDelay(xDelay);
   }
+}
+
+void sendMaxSizeMessage() {
+  uint8_t payloadArray[74];
+
+  for(int i = 0; i < 74; ++i) {
+    payloadArray[i] = 0b00011001;
+  }
+  std::vector<uint8_t> message = createMessage(payloadArray, 74, false, true, true); 
+  for(int i = 0; i < BASE_TRAME_SIZE + 74; ++i) {
+    sendByte(message[i]);
+  } 
 }
 
 /*--------------------------------------------------*/
@@ -278,7 +285,6 @@ void TaskReceive(void *pvParameters) {
         }
       } else  { // First bit 
           addBit(0);
-          // if(rxVal == 0) addBit(!rxVal);
       }
 
       lastChangeTime = currentTime;
@@ -289,31 +295,37 @@ void TaskReceive(void *pvParameters) {
 void TaskSend(void *pvParameters) {  
   const uint8_t size = 4;
   uint8_t payloadArray[size] = {
-    0b11011101, 
-    0b11011111,
-    0b00011101,
-    0b00000111,
+    0b11011101, // 221
+    0b11011111, // 223
+    0b00011101, // 29
+    0b00000111, // 7
   };
   
-  std::vector<uint8_t> message = createMessage(payloadArray, size);
+  std::vector<uint8_t> message1 = createMessage(payloadArray, size, false, true, true);   // success
+  std::vector<uint8_t> message2 = createMessage(payloadArray, size, true, true, true);    // crc error
+  std::vector<uint8_t> message3 = createMessage(payloadArray, size, false, false, true);  // missing start
+  std::vector<uint8_t> message4 = createMessage(payloadArray, size, false, true, false);  // missing end
+
 
   for(int i = 0; i < BASE_TRAME_SIZE + size; ++i) {
-    sendByte(message[i]);
+    sendByte(message1[i]);
   } 
 
   for(int i = 0; i < BASE_TRAME_SIZE + size; ++i) {
-    sendByte(message[i]);
+    sendByte(message2[i]);
   }
 
   for(int i = 0; i < BASE_TRAME_SIZE + size; ++i) {
-    sendByte(message[i]);
+    sendByte(message3[i]);
   }
 
   for(int i = 0; i < BASE_TRAME_SIZE + size; ++i) {
-    sendByte(message[i]);
+    sendByte(message4[i]);
   }
 
-  vTaskDelay(xDelay);
+  // Max trame size
+  sendMaxSizeMessage();
+
 
   for (;;) {
     vTaskDelay(xDelay);

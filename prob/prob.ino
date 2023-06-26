@@ -125,6 +125,7 @@ void analyseTrame() {
       if(data == START_END) {
         currentState = State::START;
       } else {
+        Serial.printf("MISSING START - ");
         initState();
       }
       break;
@@ -133,6 +134,7 @@ void analyseTrame() {
       break;
     case State::HEADER_FLAG:
       if(data + BASE_TRAME_SIZE > MAX_SIZE) {
+        Serial.printf("MAX TRAME SIZE ERROR - ");
         initState();
       } else {
         payloadSize = data;
@@ -161,28 +163,34 @@ void analyseTrame() {
       if(crcVal == crc.getCRC()) {
         currentState = State::END;
       } else {
+        Serial.printf("CRC ERROR - ");
         initState();
       }
       break;
     case State::END:
         if(data == START_END) {
-          Serial.printf("Payload ");
+          Serial.printf("Successful reception - Payload ");
           for(int i = 0; i < payload.size(); i++) {
             Serial.printf(" %d ", payload[i]);
           }
+        } else {
+          Serial.printf("MISSING END ERROR - ");
         }
         // Revenir à l'état initial
-        printBuffer();
+        // printBuffer();
         initState();
         break;
   }
 }
 
 void initState() {
+   Serial.println("State Machine Inital State - Waiting for preamble...");
   currentState = State::IDLE;
   currentPayloadSize = 0;
   payloadSize = 0;
+  bufferIndex = 0;
   buffer.clear();
+  payload.clear();
 }
 
 /*---------------------------------------------------------*/

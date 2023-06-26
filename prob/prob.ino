@@ -4,15 +4,15 @@
 #include "CRC16.h"
 
 // Trame sizes
-const int MAX_SIZE = 80;
-const int BASE_TRAME_SIZE = 7;
+const int MAX_SIZE = 80;        // en octet
+const int BASE_TRAME_SIZE = 7;  // en octet
 // RX and TX pins
 const int PIN_OUT = 32; 
 const int PIN_IN = 33;
 // Time constants
 const int HALF_PERIOD = 500;            // en micro
 const int THRESHOLD_PERIOD = 280;       // en micro
-const int TIME_BETWEEN_BITS = 5000 ; // en micro
+const int TIME_BETWEEN_BITS = 5000;     // en micro
 const TickType_t xDelay = TIME_BETWEEN_BITS / 1000 * portTICK_PERIOD_MS; // en millis
 
 // Trame components
@@ -23,6 +23,7 @@ std::vector<uint8_t> buffer{};
 std::vector<uint8_t> payload{};
 
 unsigned long lastChangeTime = 0;
+unsigned long sendTaskTime = 0;
 bool checkPeriod = false;
 std::atomic<bool> receivedBit(false);
 int payloadSize;
@@ -163,10 +164,13 @@ void analyseTrame() {
       break;
     case State::END:
         if(data == START_END) {
+          unsigned long finalTime = micros() - sendTaskTime;
           Serial.printf("Successful reception - Payload ");
           for(int i = 0; i < payload.size(); i++) {
             Serial.printf(" %d ", payload[i]);
           }
+          Serial.printf(" - time %d - ", finalTime);
+
         } else {
           Serial.printf("ERROR MISSING END - ");
         }
@@ -177,7 +181,7 @@ void analyseTrame() {
 }
 
 void initState() {
-   Serial.println("State Machine Inital State - Waiting for preamble...");
+  Serial.println("State Machine Inital State - Waiting for preamble...");
   currentState = State::IDLE;
   payloadSize = 0;
   buffer.clear();
@@ -235,13 +239,14 @@ void sendByte(uint8_t bits) {
 }
 
 void sendMaxSizeMessage() {
-  uint8_t payloadArray[74];
+  const uint8_t size = 74;
+  uint8_t payloadArray[size];
 
-  for(int i = 0; i < 74; ++i) {
+  for(int i = 0; i < size; ++i) {
     payloadArray[i] = 0b00011001;
   }
-  std::vector<uint8_t> message = createMessage(payloadArray, 74, false, true, true); 
-  for(int i = 0; i < BASE_TRAME_SIZE + 74; ++i) {
+  std::vector<uint8_t> message = createMessage(payloadArray, size, false, true, true); 
+  for(int i = 0; i < BASE_TRAME_SIZE + size; ++i) {
     sendByte(message[i]);
   } 
 }
@@ -306,7 +311,7 @@ void TaskSend(void *pvParameters) {
   std::vector<uint8_t> message3 = createMessage(payloadArray, size, false, false, true);  // missing start
   std::vector<uint8_t> message4 = createMessage(payloadArray, size, false, true, false);  // missing end
 
-
+  sendTaskTime = micros();
   for(int i = 0; i < BASE_TRAME_SIZE + size; ++i) {
     sendByte(message1[i]);
   } 
@@ -324,6 +329,7 @@ void TaskSend(void *pvParameters) {
   }
 
   // Max trame size
+  sendTaskTime = micros();
   sendMaxSizeMessage();
 
 

@@ -278,7 +278,7 @@ void TaskReceive(void *pvParameters) {
         }
       } else  { // First bit 
           addBit(0);
-          if(rxVal == 0) addBit(!rxVal);
+          // if(rxVal == 0) addBit(!rxVal);
       }
 
       lastChangeTime = currentTime;
@@ -297,9 +297,23 @@ void TaskSend(void *pvParameters) {
   
   std::vector<uint8_t> message = createMessage(payloadArray, size);
 
-  for(int i = 0; i < 11; ++i) {
+  for(int i = 0; i < BASE_TRAME_SIZE + size; ++i) {
     sendByte(message[i]);
   } 
+
+  for(int i = 0; i < BASE_TRAME_SIZE + size; ++i) {
+    sendByte(message[i]);
+  }
+
+  for(int i = 0; i < BASE_TRAME_SIZE + size; ++i) {
+    sendByte(message[i]);
+  }
+
+  for(int i = 0; i < BASE_TRAME_SIZE + size; ++i) {
+    sendByte(message[i]);
+  }
+
+  vTaskDelay(xDelay);
 
   for (;;) {
     vTaskDelay(xDelay);
